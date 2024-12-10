@@ -214,6 +214,9 @@ public class KeycloakAdminRESTUser implements KeycloakClient.User {
             UserResource user = usersResource.get(uid.getUidValue());
             current = user.toRepresentation();
 
+            List<String> accumulatedRolesToAdd = new ArrayList<>();
+            List<String> accumulatedRolesToRemove = new ArrayList<>();
+
             for (AttributeDelta delta : modifications) {
                 if (delta.getName().equals(Uid.NAME)) {
                     // Keycloak doesn't support to modify 'id'
@@ -264,30 +267,43 @@ public class KeycloakAdminRESTUser implements KeycloakClient.User {
                     }
 
                 } else if (delta.getName().equals(ATTR_ROLES)) {
+                    LOGGER.info("Delta object details for ATTR_ROLES: {0}", delta);
+
                     if (delta.getValuesToAdd() != null) {
-                        List<String> rolesToAddDelta = delta.getValuesToAdd().stream()
+                        List<String> rolesToAdd = delta.getValuesToAdd().stream()
                                 .map(r -> r.toString())
                                 .collect(Collectors.toList());
-
-                        clientRolesToAdd = Transformation.groupsToClientRoleMap(rolesToAddDelta,
-                                "/",
-                                0,
-                                1,
-                                realm(realmName));
+                        accumulatedRolesToAdd.addAll(rolesToAdd);
+                        LOGGER.info("Accumulated roles to add (so far): {0}", accumulatedRolesToAdd);
                     }
+
                     if (delta.getValuesToRemove() != null) {
-                        List<String> rolesToRemoveDelta = delta.getValuesToRemove().stream()
+                        List<String> rolesToRemove = delta.getValuesToRemove().stream()
                                 .map(r -> r.toString())
                                 .collect(Collectors.toList());
-
-                        clientRolesToRemove = Transformation.groupsToClientRoleMap(rolesToRemoveDelta,
-                                "/",
-                                0,
-                                1,
-                                realm(realmName));
+                        accumulatedRolesToRemove.addAll(rolesToRemove);
+                        LOGGER.info("Accumulated roles to remove (so far): {0}", accumulatedRolesToRemove);
                     }
 
-                } else if (schema.isUserSchema(delta)) {
+                     if (!accumulatedRolesToAdd.isEmpty()) {
+                            clientRolesToAdd = Transformation.groupsToClientRoleMap(accumulatedRolesToAdd,
+                                    "/",
+                                    0,
+                                    1,
+                                    realm(realmName));
+                            LOGGER.info("Processed roles to add: {0}", clientRolesToAdd);
+                        }
+
+                        if (!accumulatedRolesToRemove.isEmpty()) {
+                            clientRolesToRemove = Transformation.groupsToClientRoleMap(accumulatedRolesToRemove,
+                                    "/",
+                                    0,
+                                    1,
+                                    realm(realmName));
+                            LOGGER.info("Processed roles to remove: {0}", clientRolesToRemove);
+                        }
+
+            } else if (schema.isUserSchema(delta)) {
                     if (schema.isMultiValuedUserSchema(delta)) {
                         Map<String, List<String>> attrs = current.getAttributes();
                         if (attrs == null) {
