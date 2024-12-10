@@ -74,50 +74,83 @@ public class KeycloakAdminRESTUser implements KeycloakClient.User {
     @Override
     public Uid createUser(KeycloakSchema schema, String realmName, Set<Attribute> createAttributes)
             throws AlreadyExistsException {
+        LOGGER.info("Starting user creation process. Realm: {0}, Attributes: {1}", realmName, createAttributes);
+
         UserRepresentation newUser = toUserRep(schema, createAttributes);
+        LOGGER.info("Converted attributes to UserRepresentation. Username: {0}, Email: {1}",
+                newUser.getUsername(), newUser.getEmail());
 
         CredentialRepresentation credential = null;
         if (configuration.isPasswordResetAPIEnabled()) {
             List<CredentialRepresentation> credentials = newUser.getCredentials();
             if (credentials != null && credentials.size() == 1) {
                 credential = credentials.get(0);
+                LOGGER.info("Password reset API enabled. Extracted credential for user: {0}", newUser.getUsername());
             }
-            // Need to remove credentials when using password reset API for setting the password.
             newUser.setCredentials(null);
+            LOGGER.info("Cleared credentials from UserRepresentation for password reset API.");
         }
 
         List<String> addGroupIds = newUser.getGroups();
-        // Remove groups intentionally because keycloak expects group path list
+        if (addGroupIds != null) {
+            LOGGER.info("Extracted group IDs from UserRepresentation: {0}", addGroupIds);
+        }
         newUser.setGroups(null);
+        LOGGER.info("Cleared groups from UserRepresentation to handle them separately.");
 
+        // Extract roles from attributes
+        Map<String, List<RoleRepresentation>> clientRolesToAdd = new HashMap<>();
+        for (Attribute attribute : createAttributes) {
+            if (ATTR_ROLES.equals(attribute.getName())) {
+                List<String> roles = attribute.getValue().stream()
+                        .map(Object::toString)
+                        .collect(Collectors.toList());
+                clientRolesToAdd = Transformation.groupsToClientRoleMap(roles, "/", 0, 1, realm(realmName));
+                LOGGER.info("Extracted client roles to add: {0}", clientRolesToAdd);
+                break;
+            }
+        }
+
+        LOGGER.info("Sending request to Keycloak to create the user. Username: {0}", newUser.getUsername());
         Response res = users(realmName).create(newUser);
 
         String uuid = checkCreateResult(res, "createUser");
+        LOGGER.info("User created successfully in Keycloak. UUID: {0}, Username: {1}", uuid, newUser.getUsername());
 
-        // We need to call another API to update password and add/remove group for this user.
-        // It means that we can't execute this operation as a single transaction.
-        // Therefore, Keycloak data may be inconsistent if below callings are failed.
-        // Although this connector doesn't handle this situation, IDM can retry the update to resolve this inconsistency.
-
+        // Update password if needed
         updatePassword(realmName, uuid, credential, true);
+        LOGGER.info("Password updated for user. UUID: {0}", uuid);
 
-        // Adding groups when creating a user is supported from 9.0.2.
-        // https://github.com/keycloak/keycloak/pull/6886
-        // But it requires group path list. So we don't use this API.
-        // That's why we call another API here.
+        // Add groups to the user
         if (addGroupIds != null) {
             for (String groupId : addGroupIds) {
                 try {
                     users(realmName).get(uuid).joinGroup(groupId);
+                    LOGGER.info("User joined group. Group ID: {0}, User ID: {1}", groupId, uuid);
                 } catch (NotFoundException e) {
-                    LOGGER.warn("The group is not found already. Skipping join the user. groupId: {0}, userId: {1}, username: {2}",
+                    LOGGER.info("Group not found. Skipping group assignment. Group ID: {0}, User ID: {1}, Username: {2}",
                             groupId, uuid, newUser.getUsername());
                 }
             }
         }
 
+        // Assign client roles to the user
+        if (!clientRolesToAdd.isEmpty()) {
+            clientRolesToAdd.forEach((client, roleList) -> {
+                try {
+                    users(realmName).get(uuid).roles().clientLevel(client).add(roleList);
+                    LOGGER.info("Assigned client roles. Client: {0}, Roles: {1}, User ID: {2}", client, roleList, uuid);
+                } catch (NotFoundException e) {
+                    LOGGER.info("Failed to assign client roles. Client: {0}, Roles: {1}, User ID: {2}, Username: {3}",
+                            client, roleList, uuid, newUser.getUsername());
+                }
+            });
+        }
+
+        LOGGER.info("User creation process completed successfully. UUID: {0}, Username: {1}", uuid, newUser.getUsername());
         return new Uid(uuid, new Name(newUser.getUsername()));
     }
+
 
     protected UserRepresentation toUserRep(KeycloakSchema schema, Set<Attribute> attributes) {
         UserRepresentation newUser = new UserRepresentation();
