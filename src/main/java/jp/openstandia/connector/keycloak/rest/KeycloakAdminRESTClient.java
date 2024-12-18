@@ -32,6 +32,8 @@ import org.keycloak.representations.idm.ClientRepresentation;
 
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
+import org.keycloak.representations.idm.ClientScopeRepresentation;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -70,10 +72,14 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
     @Override
     public Uid createClient(KeycloakSchema schema, String realmName, Set<Attribute> createAttributes) throws AlreadyExistsException {
         ClientRepresentation rep = toClientRep(schema, createAttributes);
-
+        List<String> clientScopes = rep.getDefaultClientScopes();
+        rep.setDefaultClientScopes(null);
         Response res = clients(realmName).create(rep);
-
         String uuid = checkCreateResult(res, "createClient");
+
+        for (String scopeIdToAdd : adminClient.realm(realmName).clientScopes().findAll().stream().filter(scope -> clientScopes.contains(scope.getName())).map(ClientScopeRepresentation::getId).collect(Collectors.toList())){
+            clients(realmName).get(uuid).addDefaultClientScope(scopeIdToAdd);
+        }
 
         return new Uid(uuid, new Name(rep.getClientId()));
     }
@@ -143,6 +149,12 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
 
             } else if (attr.getName().equals(ATTR_AUTHORIZATION_SERVICES_ENABLED)) {
                 newClient.setAuthorizationServicesEnabled(AttributeUtil.getBooleanValue(attr));
+
+            } else if (attr.getName().equals(ATTR_FULL_SCOPE_ALLOWED)){
+                newClient.setFullScopeAllowed(AttributeUtil.getBooleanValue(attr));
+
+            } else if (attr.getName().equals(ATTR_DEFAULT_CLIENT_SCOPES)){
+                newClient.setDefaultClientScopes(attr.getValue().stream().map(Object::toString).collect(Collectors.toList()));
 
             } else if (schema.isClientSchema(attr) || attr.getName().equals(ATTR_ATTRIBUTES)) {
                 // Configured Attributes
@@ -258,6 +270,20 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
                 } else if (delta.getName().equals(ATTR_AUTHORIZATION_SERVICES_ENABLED)) {
                     current.setAuthorizationServicesEnabled(AttributeDeltaUtil.getBooleanValue(delta));
 
+                } else if (delta.getName().equals(ATTR_FULL_SCOPE_ALLOWED)) {
+                    current.setFullScopeAllowed(AttributeDeltaUtil.getBooleanValue(delta));
+
+                } else if (delta.getName().equals(ATTR_DEFAULT_CLIENT_SCOPES)) {
+                    if (delta.getValuesToAdd() != null){
+                        for (String scopeIdToAdd : adminClient.realm(realmName).clientScopes().findAll().stream().filter(scope -> delta.getValuesToAdd().stream().map(Object::toString).collect(Collectors.toList()).contains(scope.getName())).map(ClientScopeRepresentation::getId).collect(Collectors.toList())){
+                            client.addDefaultClientScope(scopeIdToAdd);
+                        }
+                    }
+                    if (delta.getValuesToRemove() != null){
+                        for (String scopeIdToDelete : adminClient.realm(realmName).clientScopes().findAll().stream().filter(scope -> delta.getValuesToRemove().stream().map(Object::toString).collect(Collectors.toList()).contains(scope.getName())).map(ClientScopeRepresentation::getId).collect(Collectors.toList())){
+                            client.addDefaultClientScope(scopeIdToDelete);
+                        }
+                    }
                 } else if (schema.isClientSchema(delta) || delta.getName().equals(ATTR_ATTRIBUTES)) {
                     // Configured Attributes
                     Map<String, String> attrs = current.getAttributes();
@@ -385,7 +411,7 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
         List<ClientRepresentation> results = clients.findByClientId(name.getNameValue());
 
         for (ClientRepresentation rep : results) {
-            if (rep.getName().equalsIgnoreCase(name.getNameValue())) {
+            if (rep.getClientId() != null && rep.getClientId().equalsIgnoreCase(name.getNameValue())) {
                 // Found
                 handler.handle(toConnectorObject(schema, realmName, rep, attributesToGet, allowPartialAttributeValues, queryPageSize));
                 return;
@@ -458,6 +484,12 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
         }
         if (shouldReturn(attributesToGet, ATTR_AUTHORIZATION_SERVICES_ENABLED)) {
             builder.addAttribute(ATTR_AUTHORIZATION_SERVICES_ENABLED, rep.getAuthorizationServicesEnabled());
+        }
+        if (shouldReturn(attributesToGet, ATTR_FULL_SCOPE_ALLOWED)) {
+            builder.addAttribute(ATTR_FULL_SCOPE_ALLOWED, rep.isFullScopeAllowed());
+        }
+        if (shouldReturn(attributesToGet, ATTR_DEFAULT_CLIENT_SCOPES)) {
+            builder.addAttribute(ATTR_DEFAULT_CLIENT_SCOPES, rep.getDefaultClientScopes());
         }
 
         Map<String, String> attributes = rep.getAttributes();
