@@ -187,6 +187,9 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
             } else if (attr.getName().equals(ATTR_DEFAULT_CLIENT_SCOPES)) {
                 newClient.setDefaultClientScopes(attr.getValue().stream().map(Object::toString).collect(Collectors.toList()));
 
+            } else if (attr.getName().equals(ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES)) {
+                continue;
+
             } else if (schema.isClientSchema(attr) || attr.getName().equals(ATTR_ATTRIBUTES)) {
                 // Configured Attributes
                 Map<String, String> attrs = newClient.getAttributes();
@@ -578,7 +581,6 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
         }
         if (shouldReturn(attributesToGet, ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES)) {
             List<String> serviceAccountClientRoles = new ArrayList<>();
-            LOGGER.info("Current service account Roles: {0}", clients(realmName).get(rep.getId()).getServiceAccountUser().getClientRoles());
             if (clients(realmName).get(rep.getId()).getServiceAccountUser().getClientRoles() != null){
                 serviceAccountClientRoles = clients(realmName).get(rep.getId()).getServiceAccountUser().getClientRoles().values().stream().reduce((rolesFragment1, rolesFragment2) -> {
                     rolesFragment1.addAll(rolesFragment2);
