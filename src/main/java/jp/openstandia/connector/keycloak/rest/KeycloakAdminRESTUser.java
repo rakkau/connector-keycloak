@@ -294,6 +294,7 @@ public class KeycloakAdminRESTUser implements KeycloakClient.User {
                             LOGGER.info("Processed roles to add: {0}", clientRolesToAdd);
                         }
 
+
                         if (!accumulatedRolesToRemove.isEmpty()) {
                             clientRolesToRemove = Transformation.groupsToClientRoleMap(accumulatedRolesToRemove,
                                     "/",
