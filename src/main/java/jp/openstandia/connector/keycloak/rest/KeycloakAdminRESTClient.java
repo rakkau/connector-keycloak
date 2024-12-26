@@ -81,8 +81,10 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
         Response res = clients(realmName).create(rep);
         String clientUUID = realm(realmName).clients().findByClientId("realm-management").getFirst().getId();
         String uuid = checkCreateResult(res, "createClient");
-        for (String scopeIdToAdd : adminClient.realm(realmName).clientScopes().findAll().stream().filter(scope -> clientScopes.contains(scope.getName())).map(ClientScopeRepresentation::getId).collect(Collectors.toList())) {
-            clients(realmName).get(uuid).addDefaultClientScope(scopeIdToAdd);
+        if (clientScopes != null && !clientScopes.isEmpty()){
+            for (String scopeIdToAdd : adminClient.realm(realmName).clientScopes().findAll().stream().filter(scope -> clientScopes.contains(scope.getName())).map(ClientScopeRepresentation::getId).collect(Collectors.toList())) {
+                clients(realmName).get(uuid).addDefaultClientScope(scopeIdToAdd);
+            }
         }
         Map<String, List<RoleRepresentation>> clientRolesToAdd = new HashMap<>();
         for (Attribute attr : createAttributes) {
