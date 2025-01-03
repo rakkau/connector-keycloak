@@ -62,6 +62,9 @@ public class KeycloakClientHandler extends AbstractKeycloakHandler {
     public static final String ATTR_ORIGIN = "origin";
     public static final String ATTR_WEB_ORIGINS = "webOrigins";
     public static final String ATTR_AUTHORIZATION_SERVICES_ENABLED = "authorizationServicesEnabled";
+    public static final String ATTR_FULL_SCOPE_ALLOWED = "fullScopeAllowed";
+    public static final String ATTR_DEFAULT_CLIENT_SCOPES = "defaultClientScopes";
+    public static final String ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES = "serviceAccountRealmManagementRoles";
 
     // saml
 
@@ -161,6 +164,20 @@ public class KeycloakClientHandler extends AbstractKeycloakHandler {
         builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_AUTHORIZATION_SERVICES_ENABLED)
                 .setRequired(false)
                 .setType(Boolean.class)
+                .build());
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_FULL_SCOPE_ALLOWED)
+                .setRequired(false)
+                .setType(Boolean.class)
+                .build());
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_DEFAULT_CLIENT_SCOPES)
+                .setRequired(false)
+                .setType(String.class)
+                .setMultiValued(true)
+                .build());
+        builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES)
+                .setRequired(false)
+                .setType(String.class)
+                .setMultiValued(true)
                 .build());
 
         // __ENABLE__ attribute

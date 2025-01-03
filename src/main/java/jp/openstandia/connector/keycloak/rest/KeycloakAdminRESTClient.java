@@ -18,6 +18,7 @@ package jp.openstandia.connector.keycloak.rest;
 import jp.openstandia.connector.keycloak.KeycloakClient;
 import jp.openstandia.connector.keycloak.KeycloakConfiguration;
 import jp.openstandia.connector.keycloak.KeycloakSchema;
+import jp.openstandia.connector.keycloak.common.Transformation;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.framework.common.exceptions.AlreadyExistsException;
@@ -32,6 +33,11 @@ import org.keycloak.representations.idm.ClientRepresentation;
 
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
+
+import org.keycloak.representations.idm.ClientScopeRepresentation;
+import org.keycloak.representations.idm.RoleRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -70,10 +76,43 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
     @Override
     public Uid createClient(KeycloakSchema schema, String realmName, Set<Attribute> createAttributes) throws AlreadyExistsException {
         ClientRepresentation rep = toClientRep(schema, createAttributes);
-
+        List<String> clientScopes = rep.getDefaultClientScopes();
+        rep.setDefaultClientScopes(null);
         Response res = clients(realmName).create(rep);
-
+        String clientUUID = realm(realmName).clients().findByClientId("realm-management").getFirst().getId();
         String uuid = checkCreateResult(res, "createClient");
+        if (clientScopes != null && !clientScopes.isEmpty()){
+            for (String scopeIdToAdd : adminClient.realm(realmName).clientScopes().findAll().stream().filter(scope -> clientScopes.contains(scope.getName())).map(ClientScopeRepresentation::getId).collect(Collectors.toList())) {
+                clients(realmName).get(uuid).addDefaultClientScope(scopeIdToAdd);
+            }
+        }
+        Map<String, List<RoleRepresentation>> clientRolesToAdd = new HashMap<>();
+        for (Attribute attr : createAttributes) {
+            if (attr.getName().equals(ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES)) {
+                Map<String, List<RoleRepresentation>> tempclientRolesToAdd = Transformation.groupsToClientRoleMap(attr.getValue().stream().map(role -> clientUUID + "/" + role.toString()).collect(Collectors.toList()),
+                        "/",
+                        0,
+                        1,
+                        realm(realmName));
+                tempclientRolesToAdd.forEach((key, value) -> {
+                    clientRolesToAdd.merge(key, value, (currentRoles, newRoles) -> {
+                        currentRoles.addAll(newRoles);
+                        return currentRoles;
+                    });
+                });
+            }
+        }
+        if (!clientRolesToAdd.isEmpty()) {
+            UserRepresentation serviceAccount = clients(realmName).get(uuid).getServiceAccountUser();
+            clientRolesToAdd.forEach((client, roleList) -> {
+                try {
+                    realm(realmName).users().get(serviceAccount.getId()).roles().clientLevel(client).add(roleList);
+                } catch (NotFoundException e) {
+                    LOGGER.warn("Assignment of client roles to user failed. client: {0}, role: {1}, userId: {2}, username: {3}",
+                            client, roleList, serviceAccount.getId(), serviceAccount.getUsername());
+                }
+            });
+        }
 
         return new Uid(uuid, new Name(rep.getClientId()));
     }
@@ -144,6 +183,15 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
             } else if (attr.getName().equals(ATTR_AUTHORIZATION_SERVICES_ENABLED)) {
                 newClient.setAuthorizationServicesEnabled(AttributeUtil.getBooleanValue(attr));
 
+            } else if (attr.getName().equals(ATTR_FULL_SCOPE_ALLOWED)) {
+                newClient.setFullScopeAllowed(AttributeUtil.getBooleanValue(attr));
+
+            } else if (attr.getName().equals(ATTR_DEFAULT_CLIENT_SCOPES)) {
+                newClient.setDefaultClientScopes(attr.getValue().stream().map(Object::toString).collect(Collectors.toList()));
+
+            } else if (attr.getName().equals(ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES)) {
+                continue;
+
             } else if (schema.isClientSchema(attr) || attr.getName().equals(ATTR_ATTRIBUTES)) {
                 // Configured Attributes
                 Map<String, String> attrs = newClient.getAttributes();
@@ -186,7 +234,9 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
     public void updateClient(KeycloakSchema schema, String realmName, Uid uid, Set<AttributeDelta> modifications, OperationOptions options) throws UnknownUidException {
         ClientsResource resource = clients(realmName);
         ClientRepresentation current;
-
+        String realmManagementUUID = realm(realmName).clients().findByClientId("realm-management").getFirst().getId();
+        Map<String, List<RoleRepresentation>> clientRolesToAdd = new HashMap<>();
+        Map<String, List<RoleRepresentation>> clientRolesToRemove = new HashMap<>();
         try {
             ClientResource client = resource.get(uid.getUidValue());
             current = client.toRepresentation();
@@ -258,6 +308,49 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
                 } else if (delta.getName().equals(ATTR_AUTHORIZATION_SERVICES_ENABLED)) {
                     current.setAuthorizationServicesEnabled(AttributeDeltaUtil.getBooleanValue(delta));
 
+                } else if (delta.getName().equals(ATTR_FULL_SCOPE_ALLOWED)) {
+                    current.setFullScopeAllowed(AttributeDeltaUtil.getBooleanValue(delta));
+
+                } else if (delta.getName().equals(ATTR_DEFAULT_CLIENT_SCOPES)) {
+                    if (delta.getValuesToAdd() != null) {
+                        for (String scopeIdToAdd : adminClient.realm(realmName).clientScopes().findAll().stream().filter(scope -> delta.getValuesToAdd().stream().map(Object::toString).collect(Collectors.toList()).contains(scope.getName())).map(ClientScopeRepresentation::getId).collect(Collectors.toList())) {
+                            client.addDefaultClientScope(scopeIdToAdd);
+                        }
+                    }
+                    if (delta.getValuesToRemove() != null) {
+                        for (String scopeIdToDelete : adminClient.realm(realmName).clientScopes().findAll().stream().filter(scope -> delta.getValuesToRemove().stream().map(Object::toString).collect(Collectors.toList()).contains(scope.getName())).map(ClientScopeRepresentation::getId).collect(Collectors.toList())) {
+                            client.removeDefaultClientScope(scopeIdToDelete);
+                        }
+                    }
+
+                } else if (delta.getName().equals(ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES)) {
+                    if (delta.getValuesToAdd() != null){
+                        Map<String, List<RoleRepresentation>> tempclientRolesToAdd = Transformation.groupsToClientRoleMap(delta.getValuesToAdd().stream().map(role -> realmManagementUUID + "/" + role.toString()).collect(Collectors.toList()),
+                                "/",
+                                0,
+                                1,
+                                realm(realmName));
+                        tempclientRolesToAdd.forEach((key, value) -> {
+                            clientRolesToAdd.merge(key, value, (currentRoles, newRoles) -> {
+                                currentRoles.addAll(newRoles);
+                                return currentRoles;
+                            });
+                        });
+                    }
+                    if (delta.getValuesToRemove() != null){
+                        Map<String, List<RoleRepresentation>> tempclientRolesToRemove = Transformation.groupsToClientRoleMap(delta.getValuesToAdd().stream().map(role -> realmManagementUUID + "/" + role.toString()).collect(Collectors.toList()),
+                                "/",
+                                0,
+                                1,
+                                realm(realmName));
+                        tempclientRolesToRemove.forEach((key, value) -> {
+                            clientRolesToRemove.merge(key, value, (currentRoles, newRoles) -> {
+                                currentRoles.addAll(newRoles);
+                                return currentRoles;
+                            });
+                        });
+                    }
+
                 } else if (schema.isClientSchema(delta) || delta.getName().equals(ATTR_ATTRIBUTES)) {
                     // Configured Attributes
                     Map<String, String> attrs = current.getAttributes();
@@ -313,6 +406,29 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
                 } else {
                     invalidSchema(delta.getName());
                 }
+            }
+
+            if (!clientRolesToAdd.isEmpty()) {
+                UserRepresentation serviceAccount = clients(realmName).get(current.getId()).getServiceAccountUser();
+                clientRolesToAdd.forEach((clientUUID, roleList) -> {
+                    try {
+                        realm(realmName).users().get(serviceAccount.getId()).roles().clientLevel(clientUUID).add(roleList);
+                    } catch (NotFoundException e) {
+                        LOGGER.warn("Assignment of client roles to user failed. client: {0}, role: {1}, userId: {2}, username: {3}",
+                                client, roleList, serviceAccount.getId(), serviceAccount.getUsername());
+                    }
+                });
+            }
+            if (!clientRolesToRemove.isEmpty()) {
+                UserRepresentation serviceAccount = clients(realmName).get(current.getId()).getServiceAccountUser();
+                clientRolesToRemove.forEach((clientUUID, roleList) -> {
+                    try {
+                        realm(realmName).users().get(serviceAccount.getId()).roles().clientLevel(clientUUID).remove(roleList);
+                    } catch (NotFoundException e) {
+                        LOGGER.warn("Assignment of client roles to user failed. client: {0}, role: {1}, userId: {2}, username: {3}",
+                                client, roleList, serviceAccount.getId(), serviceAccount.getUsername());
+                    }
+                });
             }
 
             // TODO Optimize update if no diff
@@ -385,7 +501,7 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
         List<ClientRepresentation> results = clients.findByClientId(name.getNameValue());
 
         for (ClientRepresentation rep : results) {
-            if (rep.getName().equalsIgnoreCase(name.getNameValue())) {
+            if (rep.getClientId() != null && rep.getClientId().equalsIgnoreCase(name.getNameValue())) {
                 // Found
                 handler.handle(toConnectorObject(schema, realmName, rep, attributesToGet, allowPartialAttributeValues, queryPageSize));
                 return;
@@ -458,6 +574,22 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
         }
         if (shouldReturn(attributesToGet, ATTR_AUTHORIZATION_SERVICES_ENABLED)) {
             builder.addAttribute(ATTR_AUTHORIZATION_SERVICES_ENABLED, rep.getAuthorizationServicesEnabled());
+        }
+        if (shouldReturn(attributesToGet, ATTR_FULL_SCOPE_ALLOWED)) {
+            builder.addAttribute(ATTR_FULL_SCOPE_ALLOWED, rep.isFullScopeAllowed());
+        }
+        if (shouldReturn(attributesToGet, ATTR_DEFAULT_CLIENT_SCOPES)) {
+            builder.addAttribute(ATTR_DEFAULT_CLIENT_SCOPES, rep.getDefaultClientScopes());
+        }
+        if (shouldReturn(attributesToGet, ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES)) {
+            List<String> serviceAccountClientRoles = new ArrayList<>();
+            if (clients(realmName).get(rep.getId()).getServiceAccountUser().getClientRoles() != null){
+                serviceAccountClientRoles = clients(realmName).get(rep.getId()).getServiceAccountUser().getClientRoles().values().stream().reduce((rolesFragment1, rolesFragment2) -> {
+                    rolesFragment1.addAll(rolesFragment2);
+                    return rolesFragment1;
+                }).orElse(new ArrayList<>());
+            }
+            builder.addAttribute(ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES, serviceAccountClientRoles);
         }
 
         Map<String, String> attributes = rep.getAttributes();
