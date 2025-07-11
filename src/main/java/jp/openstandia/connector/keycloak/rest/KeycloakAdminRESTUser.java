@@ -130,7 +130,7 @@ public class KeycloakAdminRESTUser implements KeycloakClient.User {
         LOGGER.info("Password updated for user. UUID: {0}", uuid);
 
         // Add groups to the user
-   /*     if (addGroupIds != null) {
+        if (addGroupIds != null) {
             for (String groupId : addGroupIds) {
                 try {
                     users(realmName).get(uuid).joinGroup(groupId);
@@ -140,10 +140,10 @@ public class KeycloakAdminRESTUser implements KeycloakClient.User {
                             groupId, uuid, newUser.getUsername());
                 }
             }
-        }*/
+        }
 
         // Assign client roles to the user
-/*        if (!clientRolesToAdd.isEmpty()) {
+        if (!clientRolesToAdd.isEmpty()) {
             clientRolesToAdd.forEach((client, roleList) -> {
                 try {
                     users(realmName).get(uuid).roles().clientLevel(client).add(roleList);
@@ -153,7 +153,7 @@ public class KeycloakAdminRESTUser implements KeycloakClient.User {
                             client, roleList, uuid, newUser.getUsername());
                 }
             });
-        }*/
+        }
 
         LOGGER.info("Attempting to create user: {0}", newUser);
         LOGGER.info("User creation process completed successfully. UUID: {0}, Username: {1}", uuid, newUser.getUsername());
