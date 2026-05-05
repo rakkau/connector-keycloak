@@ -80,7 +80,7 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
         rep.setDefaultClientScopes(null);
 
         Response res = clients(realmName).create(rep);
-        String clientUUID = realm(realmName).clients().findByClientId("realm-management").getFirst().getId();
+        String clientUUID = realm(realmName).clients().findByClientId("realm-management").get(0).getId();
         String uuid = checkCreateResult(res, "createClient");
 
         if (clientScopes != null && !clientScopes.isEmpty()){
@@ -237,7 +237,7 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
         ClientsResource resource = clients(realmName);
         ClientRepresentation current;
 
-        String realmManagementUUID = realm(realmName).clients().findByClientId("realm-management").getFirst().getId();
+        String realmManagementUUID = realm(realmName).clients().findByClientId("realm-management").get(0).getId();
         Map<String, List<RoleRepresentation>> clientRolesToAdd = new HashMap<>();
         Map<String, List<RoleRepresentation>> clientRolesToRemove = new HashMap<>();
 
