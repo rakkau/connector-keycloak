@@ -548,7 +548,12 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
 
         // openid-connect
         if (shouldReturn(attributesToGet, ATTR_SECRET)) {
-            builder.addAttribute(ATTR_SECRET, new GuardedString(rep.getSecret().toCharArray()));
+            if (rep.getSecret() != null){
+                builder.addAttribute(ATTR_SECRET, new GuardedString(rep.getSecret().toCharArray()));
+            } else {
+                builder.addAttribute(ATTR_SECRET, new GuardedString("".toCharArray()));
+            }
+
         }
         if (shouldReturn(attributesToGet, ATTR_PUBLIC_CLIENT)) {
             builder.addAttribute(ATTR_PUBLIC_CLIENT, rep.isPublicClient());
@@ -589,12 +594,21 @@ public class KeycloakAdminRESTClient implements KeycloakClient.Client {
         }
         if (shouldReturn(attributesToGet, ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES)) {
             List<String> serviceAccountClientRoles = new ArrayList<>();
-            if (clients(realmName).get(rep.getId()).getServiceAccountUser().getClientRoles() != null){
-                serviceAccountClientRoles = clients(realmName).get(rep.getId()).getServiceAccountUser().getClientRoles().values().stream().reduce((rolesFragment1, rolesFragment2) -> {
-                    rolesFragment1.addAll(rolesFragment2);
-                    return rolesFragment1;
-                }).orElse(new ArrayList<>());
+
+            if (Boolean.TRUE.equals(rep.isServiceAccountsEnabled())) {
+                try {
+                    UserRepresentation saUser = clients(realmName).get(rep.getId()).getServiceAccountUser();
+                    if (saUser != null && saUser.getClientRoles() != null) {
+                        serviceAccountClientRoles = saUser.getClientRoles().values().stream().reduce((rolesFragment1, rolesFragment2) -> {
+                            rolesFragment1.addAll(rolesFragment2);
+                            return rolesFragment1;
+                        }).orElse(new ArrayList<>());
+                    }
+                } catch (NotFoundException e) {
+                    LOGGER.ok("[{0}] Service account enabled but user not found for client: {1}", instanceName, rep.getClientId());
+                }
             }
+
             builder.addAttribute(ATTR_SERVICE_ACCOUNT_REALM_MANAGEMENT_ROLES, serviceAccountClientRoles);
         }
 
