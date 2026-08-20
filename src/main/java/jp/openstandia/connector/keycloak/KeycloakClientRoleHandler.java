@@ -69,7 +69,6 @@ public class KeycloakClientRoleHandler extends AbstractKeycloakHandler {
                 .setRequired(true)
                 .setUpdateable(true)
                 .setNativeName(ATTR_NAME)
-                .setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE)
                 .build());
 
         builder.addAttributeInfo(AttributeInfoBuilder.define(ATTR_DESCRIPTION)
